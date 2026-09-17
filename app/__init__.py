@@ -1,0 +1,1 @@
+"""University visual profile backend."""

@@ -1,0 +1,34 @@
+{
+  "university": {
+    "id": "e1c4fd9e-e5e1-50c0-8919-8e675d48625c",
+    "name": "Nazarbayev University",
+    "aliases": [
+      "Назарбаев Университет",
+      "Назарбаев Университеті",
+      "Новый университет Астаны",
+      "Назарбаев Университетi",
+      "NU"
+    ],
+    "city": "Astana",
+    "country": "Kazakhstan",
+    "official_domain": "nu.edu.kz"
+  },
+  "categories": {
+    "campus": [],
+    "library": [],
+    "dormitory": [],
+    "classroom": [],
+    "student_life": [],
+    "facilities": []
+  },
+  "statistics": {
+    "found": 4,
+    "duplicates_removed": 0,
+    "verified": 0,
+    "rejected": 0
+  },
+  "warnings": [
+    "AI verification was unavailable for 4 image(s)."
+  ],
+  "generated_at": "2026-09-17T17:47:27.187811Z"
+}
