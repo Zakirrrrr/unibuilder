@@ -13,6 +13,7 @@ PROFILE_CATEGORIES = (
     ImageCategory.CLASSROOM,
     ImageCategory.STUDENT_LIFE,
     ImageCategory.FACILITIES,
+    ImageCategory.OTHER,
 )
 
 
@@ -43,6 +44,7 @@ class UniversityProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     university: University
+    preliminary_images: list[ImageCandidate] = Field(default_factory=list)
     categories: dict[ImageCategory, list[ImageCandidate]] = Field(
         default_factory=empty_profile_categories
     )

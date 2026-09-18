@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from urllib.parse import urlparse
 
 from app.config import settings
 from app.models.image import ImageCandidate, VerificationStatus
@@ -11,7 +10,6 @@ from app.services.ai_providers.base import (
     AIProviderError,
     ImageVerificationProvider,
 )
-from app.utils.text import comparison_key
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +18,7 @@ logger = logging.getLogger(__name__)
 class ImageVerifier:
     def __init__(self, provider: ImageVerificationProvider) -> None:
         self._provider = provider
+        self._semaphore = asyncio.Semaphore(max(1, settings.profile_ai_concurrency))
 
     async def verify(
         self, image: ImageCandidate, university: University
@@ -44,9 +43,10 @@ class ImageVerifier:
         )
 
     async def verify_many(
-        self, images: list[ImageCandidate], university: University
+        self, images: list[ImageCandidate], university: University,
+        *, timeout_seconds: float = 25,
     ) -> list[ImageCandidate]:
-        semaphore = asyncio.Semaphore(settings.profile_ai_concurrency)
+        semaphore = self._semaphore
 
         async def verify_one(image: ImageCandidate) -> ImageCandidate:
             try:
@@ -77,11 +77,72 @@ class ImageVerifier:
             return image.model_copy(
                 update={
                     "verification_status": VerificationStatus.UNCERTAIN,
+                    "is_real_photo": None, "is_relevant": None, "confidence": None,
                     "verification_reason": reason,
                 }
             )
 
-        return list(await asyncio.gather(*(verify_one(image) for image in images)))
+        tasks = [asyncio.create_task(verify_one(image)) for image in images]
+        if not tasks:
+            return []
+        try:
+            done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
+            return [
+                task.result() if task in done else image.model_copy(update={
+                    "verification_status": VerificationStatus.UNCERTAIN,
+                    "is_real_photo": None, "is_relevant": None, "confidence": None,
+                    "verification_reason": "Verification deadline reached.",
+                })
+                for task, image in zip(tasks, images)
+            ]
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def select_many(self, images, university, *, timeout_seconds=25):
+        """Concurrent category comparisons, at most six images per call."""
+        if not hasattr(self._provider, "verify_group"):
+            return await self.verify_many(images, university, timeout_seconds=timeout_seconds)
+        groups = {}
+        for image in images:
+            groups.setdefault(image.category, []).append(image)
+
+        async def compare(group):
+            try:
+                async with self._semaphore:
+                    return await self._provider.verify_group(group, university)
+            except Exception as exc:
+                logger.warning("category selection unavailable error=%s", type(exc).__name__)
+                return {}
+
+        tasks = [asyncio.create_task(compare(group[start:start + 6]))
+                 for group in groups.values() for start in range(0, len(group), 6)]
+        decisions = {}
+        try:
+            if tasks:
+                done, _ = await asyncio.wait(tasks, timeout=timeout_seconds)
+                for task in done:
+                    decisions.update(task.result())
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        results = []
+        for image in images:
+            decision = decisions.get(str(image.id))
+            updates = dict(is_real_photo=None, is_relevant=None, confidence=None,
+                           quality_score=None, is_primary=False, is_interesting=False, interest_reason=None,
+                           verification_status=VerificationStatus.UNCERTAIN,
+                           verification_reason="AI selection unavailable or deadline reached.")
+            if decision:
+                updates.update(decision.model_dump(exclude={"image_id", "reason"}))
+                updates["verification_reason"] = decision.reason
+                updates["verification_status"] = self._verification_status(decision, image, university)
+            results.append(image.model_copy(update=updates))
+        return results
 
     @classmethod
     def _verification_status(
@@ -95,15 +156,13 @@ class ImageVerifier:
                 return VerificationStatus.REJECTED
             return VerificationStatus.UNCERTAIN
 
-        # Provider status may make a locally supported result more conservative,
-        # but it can never promote weak context to confirmed.
+        # AI evaluates affiliation; no exact title, domain or address gate.
         if decision.verification_status == "uncertain":
             return VerificationStatus.UNCERTAIN
         if decision.verification_status == "rejected":
             return VerificationStatus.UNCERTAIN
         if (
             decision.confidence >= 0.85
-            and cls._has_strong_context(image, university)
         ):
             if decision.verification_status == "likely":
                 return VerificationStatus.LIKELY
@@ -111,30 +170,3 @@ class ImageVerifier:
         if decision.confidence >= 0.65:
             return VerificationStatus.LIKELY
         return VerificationStatus.UNCERTAIN
-
-    @staticmethod
-    def _has_strong_context(
-        image: ImageCandidate, university: University
-    ) -> bool:
-        context = " ".join(
-            value for value in (image.title, image.description) if value
-        )
-        context_key = comparison_key(context)
-        names = [university.name, *university.aliases]
-        if any(
-            len(comparison_key(name)) >= 3
-            and comparison_key(name) in context_key
-            for name in names
-        ):
-            return True
-        if university.official_domain:
-            source_host = (
-                urlparse(str(image.source_url)).hostname or ""
-            ).casefold().removeprefix("www.")
-            official_domain = university.official_domain.casefold().removeprefix(
-                "www."
-            )
-            return source_host == official_domain or source_host.endswith(
-                f".{official_domain}"
-            )
-        return False

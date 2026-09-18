@@ -34,13 +34,32 @@ class ImageDiscoveryService:
     ) -> list[ImageCandidate]:
         requests = [
             source.search(university, query, limit_per_query)
-            for query in self.build_queries(university)
             for source in self._sources
+            for query in (
+                [university.name] if getattr(source, "university_wide", False)
+                else self.build_queries(university)
+            )
         ]
         if not requests:
             return []
 
-        results = await asyncio.gather(*requests, return_exceptions=True)
+        tasks = [asyncio.create_task(request) for request in requests]
+        try:
+            done, pending = await asyncio.wait(tasks, timeout=8.0)
+            results = []
+            for task in tasks:
+                if task in done:
+                    try:
+                        results.append(task.result())
+                    except Exception as exc:
+                        results.append(exc)
+                else:
+                    results.append(TimeoutError("Image source deadline"))
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         failures = 0
         images: list[ImageCandidate] = []
         seen_urls: set[str] = set()
@@ -71,15 +90,11 @@ class ImageDiscoveryService:
     @staticmethod
     def build_queries(university: University) -> list[str]:
         name = normalize_query(university.name).replace('"', "")
-        city = (
-            normalize_query(university.city).replace('"', "")
-            if university.city
-            else None
-        )
+        # Requiring city AND topic excludes many correctly identified campus files.
         return [
             " ".join(
                 part
-                for part in (f'"{name}"', topic.term, f'"{city}"' if city else None)
+                for part in (f'"{name}"', topic.term)
                 if part
             )
             for topic in SEARCH_TOPICS

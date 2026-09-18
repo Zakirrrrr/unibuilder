@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Генератор визуального профиля университета">
+  <title>University Visual Profile</title>
+  <link rel="stylesheet" href="/static/styles.css?v=photos-3">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">AI CAMPUS SCOUT</p>
+      <h1>Визуальный профиль<br><span>университета</span></h1>
+      <p class="lead">Введите название — сервис найдёт реальные фотографии, удалит дубликаты и проверит их через Gemini.</p>
+
+      <form id="profile-form" class="search-form">
+        <label for="query">Название университета</label>
+        <div class="search-row">
+          <input id="query" name="query" type="search" value="Nazarbayev University" maxlength="200" required autocomplete="organization" placeholder="Например, MIT">
+          <button id="submit-button" type="submit">
+            <span class="button-label">Создать профиль</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+        </div>
+        <p class="hint">Результат за 30 секунд. Если часть источников недоступна, покажем готовые результаты.</p>
+      </form>
+    </header>
+
+    <section id="status" class="status" aria-live="polite" hidden></section>
+
+    <section id="result" class="result" hidden>
+      <div class="university-heading">
+        <div>
+          <p class="eyebrow">PROFILE READY</p>
+          <h2 id="university-name"></h2>
+          <p id="university-location" class="location"></p>
+        </div>
+        <a id="university-domain" class="domain" target="_blank" rel="noopener noreferrer"></a>
+      </div>
+
+      <div id="photo-gallery" class="category"></div>
+      <div id="statistics" class="statistics"></div>
+      <div id="warnings" class="warnings" hidden></div>
+      <div id="categories" class="categories"></div>
+      <p id="generated-at" class="generated-at"></p>
+    </section>
+  </main>
+
+  <script src="/static/app.js?v=photos-3" defer></script>
+</body>
+</html>

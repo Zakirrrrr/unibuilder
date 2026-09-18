@@ -57,6 +57,7 @@ def test_profile_endpoint_returns_structured_profile() -> None:
         "classroom",
         "student_life",
         "facilities",
+        "other",
     }
     assert body["categories"]["campus"][0]["source_url"]
     assert body["statistics"]["verified"] == 1

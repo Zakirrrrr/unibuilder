@@ -176,3 +176,54 @@ async def test_retries_wikidata_maxlag_error(monkeypatch: pytest.MonkeyPatch) ->
 
     assert attempts == 2
     assert payload == {"search": []}
+
+
+@pytest.mark.anyio
+async def test_interactive_request_omits_maxlag():
+    def handler(request):
+        assert "maxlag" not in request.url.params
+        return httpx.Response(200, json={"search": []})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await UniversityResolver(client).resolve("Example")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("name,website,expected", [
+    ("Astana IT University", True, ResolutionStatus.RESOLVED),
+    ("Example School", True, ResolutionStatus.NOT_FOUND),
+    ("University High School", True, ResolutionStatus.NOT_FOUND),
+    ("Example University", False, ResolutionStatus.NOT_FOUND),
+])
+async def test_broad_education_type_requires_corroboration(name, website, expected):
+    entity = _entity("Q133811858", name, [])
+    entity["claims"]["P31"] = [_claim("Q2385804")]
+    if not website:
+        entity["claims"].pop("P856")
+    async with httpx.AsyncClient(transport=_transport([entity])) as client:
+        result = await UniversityResolver(client).resolve(name)
+    assert result.status == expected
+
+
+@pytest.mark.anyio
+async def test_broad_type_does_not_override_ambiguous_alias():
+    entities = [_entity("Q1", "First University", ["AITU"]),
+                _entity("Q2", "Second University", ["AITU"])]
+    for entity in entities:
+        entity["claims"]["P31"] = [_claim("Q2385804")]
+    async with httpx.AsyncClient(transport=_transport(entities)) as client:
+        result = await UniversityResolver(client).resolve("AITU")
+    assert result.status == ResolutionStatus.AMBIGUOUS
+
+
+@pytest.mark.anyio
+async def test_resolved_query_cache_returns_independent_copy():
+    entity = _entity("Q1", "Nazarbayev University", ["NU"])
+    async with httpx.AsyncClient(transport=_transport([entity])) as client:
+        resolver = UniversityResolver(client)
+        first = await resolver.resolve("NU")
+        first.university.name = "mutated"
+        async def fail(*args, **kwargs):
+            raise AssertionError("Cache must avoid another search")
+        resolver._search = fail
+        second = await resolver.resolve(" NU ")
+        assert second.university.name == "Nazarbayev University"

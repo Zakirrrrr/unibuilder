@@ -17,6 +17,7 @@ def test_university_profile_defaults() -> None:
         ImageCategory.CLASSROOM,
         ImageCategory.STUDENT_LIFE,
         ImageCategory.FACILITIES,
+        ImageCategory.OTHER,
     }
     assert all(images == [] for images in profile.categories.values())
     assert profile.statistics.found == 0

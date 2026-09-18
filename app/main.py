@@ -1,7 +1,10 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.health import router as health_router
 from app.api.images import router as images_router
@@ -17,9 +20,17 @@ from app.services.ai_providers.gemini import GeminiService
 from app.services.image_discovery import ImageDiscoveryService
 from app.services.image_deduplicator import ImageDeduplicator
 from app.services.image_sources.wikimedia import WikimediaSource
+from app.services.image_sources.official import OfficialWebsiteSource
+from app.services.image_sources.openverse import OpenverseSource
+from app.services.image_sources.google_places import GooglePlacesSource
+from app.services.image_sources.google_images import GoogleImagesSource
 from app.services.image_verifier import ImageVerifier
 from app.services.profile_pipeline import ProfilePipelineService
 from app.services.university_resolver import UniversityResolver
+from app.services.website_resolver import WebsiteUniversityResolver
+
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class UnsupportedAIProvider(ImageVerificationProvider):
@@ -47,10 +58,15 @@ async def lifespan(app: FastAPI):
         transport=transport,
         headers={"User-Agent": settings.wikidata_user_agent},
     ) as client:
-        resolver = UniversityResolver(client=client)
-        discovery = ImageDiscoveryService(
-            sources=[WikimediaSource(client=client)]
-        )
+        website_resolver = (WebsiteUniversityResolver(client, settings.serpapi_api_key)
+                            if settings.serpapi_api_key else None)
+        resolver = UniversityResolver(client=client, website_resolver=website_resolver)
+        sources = [OfficialWebsiteSource(client), OpenverseSource(client), WikimediaSource(client)]
+        if settings.google_places_api_key:
+            sources.insert(0, GooglePlacesSource(client, settings.google_places_api_key))
+        if settings.serpapi_api_key:
+            sources = [GoogleImagesSource(client, settings.serpapi_api_key)]
+        discovery = ImageDiscoveryService(sources=sources)
         deduplicator = ImageDeduplicator(client=client)
         ai_provider = build_ai_provider(client)
         verifier = ImageVerifier(provider=ai_provider)
@@ -82,6 +98,19 @@ def create_app() -> FastAPI:
     app.include_router(images_router)
     app.include_router(verification_router)
     app.include_router(profiles_router)
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.middleware("http")
+    async def frontend_no_cache(request, call_next):
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/", include_in_schema=False)
+    async def frontend() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
     return app
 
 

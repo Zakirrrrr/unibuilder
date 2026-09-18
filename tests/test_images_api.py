@@ -63,7 +63,7 @@ def test_images_search_endpoint_rejects_excessive_limit() -> None:
             "/api/images/search",
             json={
                 "university": {"name": "Example University"},
-                "limit_per_query": 6,
+                "limit_per_query": 7,
             },
         )
     finally:

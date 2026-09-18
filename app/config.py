@@ -54,22 +54,24 @@ class Settings:
         os.getenv("PERCEPTUAL_HASH_THRESHOLD", "2")
     )
     ai_provider: str = os.getenv("AI_PROVIDER", "gemini")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
     ai_timeout_seconds: float = float(os.getenv("AI_TIMEOUT_SECONDS", "30.0"))
     ai_retry_attempts: int = int(os.getenv("AI_RETRY_ATTEMPTS", "3"))
     ai_requests_per_minute: int = int(os.getenv("AI_REQUESTS_PER_MINUTE", "30"))
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
+    google_places_api_key: str | None = os.getenv("GOOGLE_PLACES_API_KEY")
+    serpapi_api_key: str | None = os.getenv("SERPAPI_API_KEY")
     profile_timeout_seconds: float = float(
-        os.getenv("PROFILE_TIMEOUT_SECONDS", "120.0")
+        min(float(os.getenv("PROFILE_TIMEOUT_SECONDS", "29.0")), 29.0)
     )
     profile_cache_ttl_seconds: float = float(
         os.getenv("PROFILE_CACHE_TTL_SECONDS", "900.0")
     )
     profile_limit_per_query: int = int(
-        os.getenv("PROFILE_LIMIT_PER_QUERY", "2")
+        os.getenv("PROFILE_LIMIT_PER_QUERY", "6")
     )
     profile_ai_concurrency: int = int(
-        os.getenv("PROFILE_AI_CONCURRENCY", "2")
+        os.getenv("PROFILE_AI_CONCURRENCY", "6")
     )
 
 

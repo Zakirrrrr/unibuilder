@@ -24,6 +24,18 @@ class ImageVerificationRequest(BaseModel):
     images: list[ImageCandidate] = Field(min_length=1, max_length=10)
 
 
+class RankedImageDecision(ImageVerificationDecision):
+    image_id: str
+    quality_score: float = Field(ge=0, le=1)
+    is_interesting: bool = False
+    interest_reason: str = Field(default="", max_length=300)
+
+
+class ImageSelectionDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    images: list[RankedImageDecision] = Field(min_length=1, max_length=6)
+
+
 class ImageVerificationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

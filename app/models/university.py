@@ -12,3 +12,5 @@ class University(BaseModel):
     city: str | None = None
     country: str | None = None
     official_domain: str | None = None
+    resolution_source: str | None = None
+    evidence_urls: list[str] = Field(default_factory=list)

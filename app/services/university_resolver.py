@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import re
+import time
 from collections.abc import Iterable
 from difflib import SequenceMatcher
 from typing import Any
@@ -12,6 +14,7 @@ from app.config import settings
 from app.models.resolution import ResolutionStatus, UniversityResolutionResponse
 from app.models.university import University
 from app.utils.text import comparison_key, normalize_query
+from app.services.website_resolver import WebsiteResolutionError
 
 
 logger = logging.getLogger(__name__)
@@ -36,13 +39,46 @@ class UniversityResolverError(RuntimeError):
 
 
 class UniversityResolver:
-    def __init__(self, client: httpx.AsyncClient) -> None:
+    def __init__(self, client: httpx.AsyncClient, website_resolver=None) -> None:
         self._client = client
+        self._website_resolver = website_resolver
+        self._cache: dict[str, tuple[float, UniversityResolutionResponse]] = {}
 
     async def resolve(self, raw_query: str) -> UniversityResolutionResponse:
+        key = comparison_key(normalize_query(raw_query))
+        cached = self._cache.get(key)
+        if cached and cached[0] > time.monotonic():
+            return cached[1].model_copy(deep=True)
+        if not self._website_resolver or not key:
+            return await self._resolve_wikidata(raw_query)
+        error = None
+        try:
+            result = await asyncio.wait_for(self._resolve_wikidata(raw_query), timeout=10)
+            # Never bypass a known ambiguity using only the first website result.
+            if result.status != ResolutionStatus.NOT_FOUND:
+                return result
+        except (UniversityResolverError, TimeoutError) as exc:
+            error = exc
+        try:
+            result = await self._website_resolver.resolve(normalize_query(raw_query))
+        except WebsiteResolutionError as exc:
+            raise UniversityResolverError("University identity sources unavailable") from exc
+        if result.status == ResolutionStatus.NOT_FOUND and error:
+            raise UniversityResolverError("University identity could not be checked") from error
+        if result.status == ResolutionStatus.RESOLVED:
+            if len(self._cache) >= 256:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[key] = (time.monotonic() + 3600, result.model_copy(deep=True))
+        return result
+
+    async def _resolve_wikidata(self, raw_query: str) -> UniversityResolutionResponse:
         query = normalize_query(raw_query)
         if not query:
             return UniversityResolutionResponse(status=ResolutionStatus.NOT_FOUND)
+        key = comparison_key(query)
+        cached = self._cache.get(key)
+        if cached and cached[0] > time.monotonic():
+            return cached[1].model_copy(deep=True)
 
         try:
             search_ids = await self._search(query)
@@ -57,7 +93,12 @@ class UniversityResolver:
                 return UniversityResolutionResponse(status=ResolutionStatus.NOT_FOUND)
 
             universities = await self._build_universities(university_entities)
-            return self._select(query, university_entities, universities)
+            result = self._select(query, university_entities, universities)
+            if result.status == ResolutionStatus.RESOLVED:
+                if len(self._cache) >= 256:
+                    self._cache.pop(next(iter(self._cache)))
+                self._cache[key] = (time.monotonic() + 3600, result.model_copy(deep=True))
+            return result
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
             logger.warning("Wikidata request failed: %s", type(exc).__name__)
             raise UniversityResolverError("Wikidata is temporarily unavailable") from exc
@@ -69,7 +110,7 @@ class UniversityResolver:
         request_params = {
             "format": "json",
             "formatversion": "2",
-            "maxlag": str(settings.wikidata_maxlag_seconds),
+            # Interactive user requests may omit maxlag (MediaWiki guidance).
             **params,
         }
         for attempt in range(MAX_UPSTREAM_ATTEMPTS):
@@ -94,7 +135,7 @@ class UniversityResolver:
                 error.get("info", "not provided"),
             )
             if error_code == "maxlag" and attempt < MAX_UPSTREAM_ATTEMPTS - 1:
-                await asyncio.sleep(2.0 * (attempt + 1))
+                await asyncio.sleep(5.0)
                 continue
             raise ValueError("Wikidata returned an API error")
         raise ValueError("Wikidata retry limit exceeded")
@@ -191,10 +232,21 @@ class UniversityResolver:
             entity["id"]: set(self._claim_entity_ids(entity, "P31"))
             for entity in entities
         }
+        # Some Wikidata entries have only the broad educational-institution type.
+        # Require corroborating entity metadata, not just a matching user query.
+        corroborated = {
+            entity["id"] for entity in entities
+            if "Q2385804" in types_by_entity[entity["id"]]
+            and self._official_domain(entity)
+            and any(re.search(r"\b(university|университет|университеті)\b", label, re.I)
+                    and not re.search(r"\b(school|школа|мектеп)\b", label, re.I)
+                    for label in self._all_terms({"labels": entity.get("labels", {})}))
+        }
         unresolved_entities = [
             entity
             for entity in entities
             if not types_by_entity[entity["id"]] & WIKIDATA_UNIVERSITY_TYPES
+            and entity["id"] not in corroborated
         ]
         unresolved_types = (
             set().union(
@@ -209,6 +261,7 @@ class UniversityResolver:
             for entity in entities
             if types_by_entity[entity["id"]]
             & (WIKIDATA_UNIVERSITY_TYPES | university_types)
+            or entity["id"] in corroborated
         ]
 
     async def _types_descending_from_university(self, type_ids: set[str]) -> set[str]:
@@ -263,6 +316,8 @@ class UniversityResolver:
                     city=city,
                     country=country,
                     official_domain=self._official_domain(entity),
+                    resolution_source="wikidata",
+                    evidence_urls=[f"https://www.wikidata.org/wiki/{item_id}"],
                 )
             )
         return universities

@@ -8,7 +8,7 @@ class ImageSearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     university: University
-    limit_per_query: int = Field(default=5, ge=1, le=5)
+    limit_per_query: int = Field(default=6, ge=1, le=6)
 
 
 class ImageSearchResponse(BaseModel):

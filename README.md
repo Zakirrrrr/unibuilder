@@ -26,7 +26,8 @@ verification additionally requires `GEMINI_API_KEY`.
 uvicorn app.main:app --reload
 ```
 
-The API is available at `http://127.0.0.1:8000`. Check it with:
+The test UI and API are available at `http://127.0.0.1:8000`. Open that address
+in a browser to generate a profile. Check the backend with:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
@@ -39,6 +40,37 @@ pytest
 ```
 
 ## Current API
+
+### Website-backed university identification
+
+Wikidata is no longer the only identity source. With `SERPAPI_API_KEY` configured,
+missing/unavailable Wikidata results trigger an official-website lookup using
+Google organic search (one additional SerpAPI search per uncached fallback).
+The primary source receives up to 10 seconds before switching to the alternative;
+website lookup is capped at 8 seconds and examines at most three distinct hosts.
+The overall profile deadline remains 29 seconds. Known Wikidata ambiguity is
+preserved rather than overridden by a search ranking.
+
+Website verification reads actual HTML, not just search snippets: matching
+`CollegeOrUniversity` JSON-LD with a same-host organization URL and exact name or
+declared alias; alternatively a matching full university title on an academic
+domain with multiple teaching/admissions signals. These are identity heuristics,
+not accreditation or legal-status verification. Missing metadata stays null.
+Multiple matching sites return `ambiguous`. HTTPS/public-host checks, bounded
+HTML sizes and same-host redirects limit the crawl. No LLM is used.
+
+University results include `resolution_source` and `evidence_urls`; the UI links
+to the identity evidence. This does not automatically confirm any photograph.
+Live standalone website check: Astana IT University resolved via
+`https://astanait.edu.kz/en` in 2.52 seconds, without consulting Wikidata.
+
+Resolver reliability: the resolver shares the overall 29-second profile deadline
+instead of having a separate seven-second cutoff. An upstream resolver timeout
+returns HTTP 503, not a misleading overall-generation HTTP 504. When resolution
+takes longer, subsequent stages use only the remaining time budget.
+Wikidata entries typed only as educational institutions are accepted only when
+their own labels identify a university and an official website is present;
+school labels are excluded. Exact/ambiguous name-selection rules still apply.
 
 - `GET /health` returns `{ "status": "ok" }`.
 - `POST /api/universities/resolve` resolves a university name or alias using
@@ -102,6 +134,39 @@ It remains skipped unless both the flag and `GEMINI_API_KEY` from `.env` exist.
 
 ## Profile pipeline
 
+The gallery is displayed above statistics, including preliminary candidates.
+Static UI responses are not cached so a stale script cannot hide new fields.
+AI decides affiliation using pixels, signage, landmarks and source context;
+there is no exact address/title/domain match required for acceptance.
+
+Optional Google Maps place photos: set `GOOGLE_PLACES_API_KEY` in `.env` with
+Places API (New) enabled. This is separate from the Gemini key. Place search
+returns candidates, not confirmed affiliations; source links and photographer
+attributions are retained and displayed. Profiles containing Google photos
+are not cached. 2GIS public Places API does not expose photo downloads:
+https://docs.2gis.com/en/api/search/places/examples/filtering
+
+The UI also shows `preliminary_images`: candidates whose AI verification has
+not finished and checked images without a specific category. Missing AI results
+remain `uncertain` with null confidence and are labelled “Не проверено AI”.
+They do not count towards `statistics.verified`. Rejected images remain hidden.
+Up to six AI checks now run concurrently, sharing a service-wide semaphore and
+the provider's rate limiter; the 29-second server deadline still applies.
+
+Image discovery combines the resolved university's official website, Openverse
+(original publisher URLs and available licence/author metadata), and Wikimedia
+Commons. Official images do not receive an invented licence or automatic
+confirmation: Gemini still evaluates the pixels and source context.
+
+Generation is capped at 29 seconds on the server (30 seconds in the UI).
+Resolution has a 7-second budget, discovery 5 seconds, deduplication 4 seconds;
+AI uses the remaining budget and completed decisions survive the deadline.
+Up to six candidates per search category are checked in six parallel batches. Unfinished checks are
+reported in warnings and never presented as confirmed. Partial profiles have
+a maximum 15-second cache lifetime so temporary failures can be retried soon.
+Successful profiles retain the normal configured TTL. Cache keys are exact
+normalized queries: ambiguous aliases are always resolved independently.
+
 Generate a profile with:
 
 ```powershell
@@ -123,3 +188,67 @@ default. Configure these controls with `PROFILE_TIMEOUT_SECONDS`,
 
 A real saved response is available at
 `examples/nazarbayev_university_profile.json`.
+# Google Images → Gemini selection
+
+## Runtime fixes and verified configuration
+
+The default vision model is now `gemini-3.5-flash-lite` (override with
+`GEMINI_MODEL` in `.env`), using the same official SDK and Interactions API.
+This [multimodal low-latency model](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite)
+replaces the slower model for the 30-second interactive workflow.
+Resolver requests omit `maxlag`, as permitted for
+[interactive MediaWiki requests](https://www.mediawiki.org/wiki/Manual:Maxlag_parameter).
+Successful resolutions are cached for one hour by exact normalized query,
+without assuming aliases are unambiguous.
+
+Image downloads follow redirects, have per-image deadlines, retain completed
+hashing results when another image is slow, and do not retry failed downloads
+sequentially during deduplication. Google search gets up to eight seconds;
+the overall backend deadline remains 29 seconds. External source failures can
+still produce partial results; no system can guarantee an external API response.
+
+Live checks on 2026-09-18: NU returned 10 AI-verified images across all six
+categories (~6.8s), Harvard 11 across five categories (~6.8s). All ten NU
+category images loaded in a real Edge browser. These are observed timings,
+not a latency guarantee. Example: `examples/working_nu_profile.json`;
+UI screenshot: `examples/ui-working.png`.
+
+Set `SERPAPI_API_KEY` in `.env` and restart the backend. This is a separate
+credential from `GEMINI_API_KEY`; do not commit either key. The integration uses
+[SerpAPI Google Images](https://serpapi.com/google-images-api), not Google Places.
+Provider quotas/pricing apply: six searches per uncached university profile.
+
+With the search key configured, Google Images replaces the previous discovery
+sources: six parallel category queries, six candidates per query by default
+(`PROFILE_LIMIT_PER_QUERY=5` for five), capped at six. Original image and
+publisher-page URLs are retained; unknown authors and licenses remain null.
+Search results are not proof of affiliation or permission to reuse an image.
+Without the key, existing sources remain available with an explicit warning.
+
+Gemini compares the candidates in one multimodal request per category, with
+bounded concurrency and the existing 29-second backend deadline. It judges
+affiliation, actual category and visual quality; no exact-address gate is used.
+Only real, relevant `likely`/`confirmed` images with quality >= 0.6 enter curated
+categories. Highest quality first, with `is_primary=true` on the best image;
+other qualifying images are included. `quality_score` is an AI assessment, not
+proof of provenance. Failed/unavailable checks remain preliminary in a separate
+collapsed UI section, never silently confirmed. A Gemini quota error cannot be
+fixed by changing the prompt: restore quota to enable AI selection.
+
+### Expanded selection and Other
+
+The profile now returns seven category keys including `other` (UI: «Другое»).
+The six searches yield up to 36 candidates, before URL/content deduplication.
+Gemini compares at most six images per call and marks `is_interesting` plus
+`interest_reason`. Relevant, clear photos with identifiable interesting subjects
+that do not fit the main categories may enter `other`; AI must explicitly flag
+them as interesting and explain why. It is not a fallback for unavailable checks,
+rejections or poor-quality photos, and may legitimately remain empty.
+Hashing preserves completed results when the 3.5-second stage budget expires.
+AI selection uses the remaining overall 29-second budget and returns completed
+batches without waiting for slow batches. The UI stops waiting at 30 seconds;
+external network/rendering latency cannot be guaranteed by the backend.
+
+Live expanded-selection checks: NU 32 found / 28 verified in 10.94s;
+Harvard 36 found / 32 verified in 14.62s. Both returned HTTP 200 with explicit
+partial-result warnings. No `other` candidates were selected in these samples.

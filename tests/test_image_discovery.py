@@ -39,7 +39,7 @@ async def test_discovery_builds_six_queries_with_city_and_deduplicates() -> None
 
     assert len(source.queries) == 6
     assert all('"Nazarbayev University"' in query for query, _ in source.queries)
-    assert all('"Astana"' in query for query, _ in source.queries)
+    assert all('"Astana"' not in query for query, _ in source.queries)
     assert all(limit == 5 for _, limit in source.queries)
     assert len(images) == 1
 

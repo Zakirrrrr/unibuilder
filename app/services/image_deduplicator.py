@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 import math
@@ -57,9 +58,30 @@ class ImageDeduplicator:
         )
 
     async def deduplicate(
-        self, images: list[ImageCandidate]
+        self, images: list[ImageCandidate], *, timeout_seconds: float | None = None
     ) -> list[ImageCandidate]:
         logger.info("found %d images", len(images))
+        semaphore = asyncio.Semaphore(12)
+
+        async def prepare(image):
+            async with semaphore:
+                try:
+                    return await asyncio.wait_for(self._with_hashes(image), timeout=2.5)
+                except TimeoutError:
+                    return image
+
+        tasks = [asyncio.create_task(prepare(image)) for image in images]
+        try:
+            if tasks:
+                done, _ = await asyncio.wait(tasks, timeout=timeout_seconds)
+                # Preserve fast downloads and hashes even if another host stalls.
+                images = [task.result() if task in done else image
+                          for task, image in zip(tasks, images)]
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         unique: list[ImageCandidate] = []
         seen_urls: set[str] = set()
         seen_content_hashes: set[str] = set()
@@ -87,7 +109,8 @@ class ImageDeduplicator:
                 removed += 1
                 continue
 
-            candidate = await self._with_hashes(image)
+            # Already attempted above. Never redownload failed images serially.
+            candidate = image
             if (
                 candidate.content_hash is not None
                 and candidate.content_hash in seen_content_hashes
@@ -131,7 +154,7 @@ class ImageDeduplicator:
         perceptual_hash = image.perceptual_hash
         if perceptual_hash is None:
             try:
-                perceptual_hash = self.compute_perceptual_hash(content)
+                perceptual_hash = await asyncio.to_thread(self.compute_perceptual_hash, content)
             except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
                 logger.warning(
                     "Could not decode image for perceptual hashing url=%s error=%s",
@@ -139,17 +162,19 @@ class ImageDeduplicator:
                     type(exc).__name__,
                 )
 
-        return image.model_copy(
+        result = image.model_copy(
             update={
                 "content_hash": content_hash,
                 "perceptual_hash": perceptual_hash,
             }
         )
+        result._downloaded_bytes = content
+        return result
 
     async def _download(self, url: str) -> bytes:
         content = bytearray()
         async with self._client.stream(
-            "GET", url, timeout=self._download_timeout_seconds
+            "GET", url, timeout=self._download_timeout_seconds, follow_redirects=True
         ) as response:
             response.raise_for_status()
             async for chunk in response.aiter_bytes():

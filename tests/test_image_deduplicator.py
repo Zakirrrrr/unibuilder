@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from io import BytesIO
 
 import httpx
@@ -70,6 +71,46 @@ def _transport(files: dict[str, bytes]) -> httpx.MockTransport:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_failed_download_is_not_retried_sequentially():
+    calls = []
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(403)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await ImageDeduplicator(client).deduplicate([_candidate("blocked")])
+    assert len(result) == 1
+    assert calls == ["/blocked"]
+
+
+@pytest.mark.anyio
+async def test_dedup_deadline_preserves_completed_hashes():
+    content = _save(_scene((96, 64)))
+    async def handler(request):
+        if request.url.path == "/slow":
+            await asyncio.sleep(10)
+        return httpx.Response(200, content=content)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await ImageDeduplicator(client).deduplicate(
+            [_candidate("fast"), _candidate("slow")], timeout_seconds=.1)
+    assert len(result) == 2
+    assert result[0].content_hash and result[0]._downloaded_bytes
+    assert result[1].content_hash is None
+
+
+@pytest.mark.anyio
+async def test_download_follows_redirect_and_retains_bytes_for_ai():
+    content = _save(_scene((96, 64)))
+    def handler(request):
+        if request.url.path == "/original":
+            return httpx.Response(302, headers={"Location": "/image.png"})
+        return httpx.Response(200, content=content)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await ImageDeduplicator(client).deduplicate([_candidate("original")])
+    assert result[0]._downloaded_bytes == content
+    assert result[0].perceptual_hash is not None
 
 
 @pytest.mark.anyio
