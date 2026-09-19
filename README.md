@@ -26,6 +26,14 @@ uvicorn app.main:app --reload
 ```
 
 The integrated frontend and API are available at `http://127.0.0.1:8000`.
+
+## Deploy the API on Render
+
+Connect this repository to Render and create a Blueprint from `render.yaml`.
+Enter `GEMINI_API_KEY` and `SERPAPI_API_KEY` as secret environment values when
+prompted. The Docker service serves the API on Render's `PORT`; its health
+check is `/health`. Keep the keys out of Git and the frontend. The deployed API
+URL can then be configured as the origin for the frontend hosted on GPT Sites.
 Enter a university name and press **Найти**. The loading screen counts down from
 30 seconds while the real API request runs. Messages appear every four seconds
 in random order and random positions, remaining visible without repeating or

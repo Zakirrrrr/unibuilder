@@ -1,0 +1,11 @@
+.git
+.env
+.venv
+__pycache__
+.pytest_cache
+tests
+examples
+uniprofile-frontend
+uniprofile-frontend.zip
+omirasaf-cover-1920x1080.png
+*.pyc

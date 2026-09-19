@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: omirasaf-api
+    runtime: docker
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SERPAPI_API_KEY
+        sync: false
