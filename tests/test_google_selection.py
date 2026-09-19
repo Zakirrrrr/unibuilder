@@ -29,7 +29,7 @@ def candidate(index=0):
 
 
 @pytest.mark.anyio
-async def test_google_six_queries_six_per_category():
+async def test_google_eight_queries_six_per_category():
     queries = []
     def handler(request):
         query = request.url.params["q"]
@@ -42,9 +42,9 @@ async def test_google_six_queries_six_per_category():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         images = await ImageDiscoveryService([GoogleImagesSource(client, "test-key")]).search(
             University(name="Example University"), 6)
-    assert len(queries) == 6
-    assert len(images) == 36
-    assert len({i.category for i in images}) == 6
+    assert len(queries) == 8
+    assert len(images) == 48
+    assert len({i.category for i in images}) == 8
     assert all(i.source_url and i.author is None and i.license is None and i.confidence is None for i in images)
 
 

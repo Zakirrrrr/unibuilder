@@ -30,7 +30,7 @@ class Settings:
     wikidata_maxlag_seconds: int = int(os.getenv("WIKIDATA_MAXLAG_SECONDS", "10"))
     wikidata_user_agent: str = os.getenv(
         "WIKIDATA_USER_AGENT",
-        "UniversityVisualProfileMVP/0.1 (hackathon backend; contact: local-development)",
+        "Unibuilder/0.1 (https://github.com/Zakirrrrr/unibuilder) httpx/0.28",
     )
     wikimedia_commons_api_url: str = os.getenv(
         "WIKIMEDIA_COMMONS_API_URL", "https://commons.wikimedia.org/w/api.php"

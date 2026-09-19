@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from app.models import ImageCategory, VerificationStatus
+from app.config import settings
 from app.models.university import University
 from app.services.image_sources.wikimedia import WikimediaSource
 
@@ -16,6 +17,7 @@ async def test_wikimedia_source_maps_urls_and_real_metadata() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.params["gsrnamespace"] == "6"
         assert request.url.params["gsrlimit"] == "2"
+        assert request.headers["User-Agent"] == settings.wikidata_user_agent
         return httpx.Response(
             200,
             json={

@@ -12,9 +12,10 @@ from app.services.image_sources.base import ImageSource, ImageSourceError
 
 
 TOPICS = dict(zip(
-    ("campus", "library", "dormitory", "students", "classroom", "building"),
+    ("campus", "library", "dormitory", "students", "classroom", "building", "sport", "laboratory", "city"),
     (ImageCategory.CAMPUS, ImageCategory.LIBRARY, ImageCategory.DORMITORY,
-     ImageCategory.STUDENT_LIFE, ImageCategory.CLASSROOM, ImageCategory.FACILITIES),
+     ImageCategory.STUDENT_LIFE, ImageCategory.CLASSROOM, ImageCategory.FACILITIES,
+     ImageCategory.SPORT, ImageCategory.LABORATORY, ImageCategory.CITY),
 ))
 
 

@@ -191,6 +191,28 @@ class WebsiteUniversityResolver:
             ("bachelor", "undergraduate", "бакалавр"),
             ("master", "graduate", "магистр"),
         ))
+        # An official academic site's domain and title can verify a short
+        # acronym even when the page has no JSON-LD alternateName (e.g. MIT).
+        domain_label = domain.split(".", 1)[0]
+        expanded_names = [
+            part for part in name_parts
+            if len(part) > len(query) and re.search(
+                r"\b(university|college|institute of technology)\b", part, re.I
+            )
+        ]
+        if (
+            2 <= len(key) <= 8
+            and re.fullmatch(r"[a-z]+", key)
+            and domain_label.casefold() == key
+            and academic and signals >= 1
+            and key in map(comparison_key, name_parts)
+            and expanded_names
+        ):
+            return University(
+                id=uuid5(NAMESPACE_URL, "https://" + domain),
+                name=expanded_names[0], aliases=[query], official_domain=domain,
+                resolution_source="official_website", evidence_urls=[url],
+            )
         if (len(key) >= 8 and academic and signals >= 2
             and re.search(r"\b(university|университет|университеті)\b", key)
             and not re.search(r"\b(school|школа)\b", key)

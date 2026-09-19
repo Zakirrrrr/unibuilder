@@ -7,6 +7,7 @@ from app.models.resolution import ResolutionStatus, UniversityResolutionResponse
 from app.models.university import University
 from app.services.image_sources.base import ImageSourceError
 from app.services.profile_pipeline import (
+    ProfileAmbiguousError,
     ProfileGenerationTimeoutError,
     ProfilePipelineService,
 )
@@ -116,6 +117,8 @@ async def test_pipeline_builds_profile_filters_rejected_and_caches() -> None:
     assert first.categories[ImageCategory.LIBRARY] == []
     assert first.preliminary_images == []
     assert first.categories[ImageCategory.CAMPUS][0].source_url is not None
+    assert first.campus_summary is not None
+    assert first.summary_sources == [str(first.categories[ImageCategory.CAMPUS][0].source_url)]
     assert all(
         image.verification_status != VerificationStatus.REJECTED
         for images in first.categories.values()
@@ -301,3 +304,31 @@ async def test_36_candidates_return_partial_profile_within_deadline():
     assert profile.statistics.found == 36
     assert profile.statistics.verified == 30
     assert len(profile.preliminary_images) == 6
+    assert all(image.category == ImageCategory.LIBRARY for image in profile.preliminary_images)
+
+
+@pytest.mark.anyio
+async def test_ambiguous_university_can_be_selected_by_id():
+    first = University(name="University", city="First City")
+    second = University(name="University", city="Second City")
+
+    class AmbiguousResolver:
+        async def resolve(self, query):
+            return UniversityResolutionResponse(
+                status=ResolutionStatus.AMBIGUOUS, candidates=[first, second]
+            )
+
+    class EmptyDiscovery:
+        async def search(self, university, limit_per_query):
+            return []
+
+    pipeline = ProfilePipelineService(
+        resolver=AmbiguousResolver(), discovery=EmptyDiscovery(),
+        deduplicator=Deduplicator(), verifier=Verifier(), timeout_seconds=2,
+    )
+    with pytest.raises(ProfileAmbiguousError):
+        await pipeline.generate("University")
+
+    result = await pipeline.generate("University", selected_university_id=second.id)
+    assert result.university.id == second.id
+    assert result.campus_summary is None

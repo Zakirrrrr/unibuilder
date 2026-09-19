@@ -17,5 +17,5 @@ def test_frontend_is_served() -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "University Visual Profile" in response.text
+    assert "Визуальный профиль университета" in response.text
     assert "/static/app.js" in response.text

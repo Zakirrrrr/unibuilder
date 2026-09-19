@@ -17,12 +17,15 @@ from app.utils.text import normalize_query
 logger = logging.getLogger(__name__)
 
 _CATEGORY_KEYWORDS = (
+    ("laboratory", ImageCategory.LABORATORY),
+    ("sport", ImageCategory.SPORT),
     ("library", ImageCategory.LIBRARY),
     ("dormitory", ImageCategory.DORMITORY),
     ("classroom", ImageCategory.CLASSROOM),
     ("students", ImageCategory.STUDENT_LIFE),
     ("campus", ImageCategory.CAMPUS),
     ("building", ImageCategory.FACILITIES),
+    (" city", ImageCategory.CITY),
 )
 _UNKNOWN_VALUES = {"", "unknown", "unknown author", "n/a", "not provided"}
 
@@ -62,7 +65,7 @@ class WikimediaSource(ImageSource):
                     "iiprop": "url|mime|mediatype|extmetadata",
                     "iiextmetadatalanguage": "en",
                     "iiextmetadatafilter": (
-                        "ImageDescription|Artist|LicenseShortName|UsageTerms"
+                        "ImageDescription|Artist|LicenseShortName|UsageTerms|DateTimeOriginal|DateTime"
                     ),
                 }
             )
@@ -82,6 +85,7 @@ class WikimediaSource(ImageSource):
             response = await self._client.get(
                 settings.wikimedia_commons_api_url,
                 params=request_params,
+                headers={"User-Agent": settings.wikidata_user_agent},
                 timeout=settings.wikimedia_timeout_seconds,
             )
             if response.status_code == 429 or response.status_code >= 500:
@@ -152,6 +156,10 @@ class WikimediaSource(ImageSource):
                     license=(
                         self._metadata(metadata, "LicenseShortName")
                         or self._metadata(metadata, "UsageTerms")
+                    ),
+                    published_at=(
+                        self._metadata(metadata, "DateTimeOriginal")
+                        or self._metadata(metadata, "DateTime")
                     ),
                     category=self._category(query),
                     is_real_photo=None,

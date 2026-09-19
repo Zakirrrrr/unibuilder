@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
         if settings.google_places_api_key:
             sources.insert(0, GooglePlacesSource(client, settings.google_places_api_key))
         if settings.serpapi_api_key:
-            sources = [GoogleImagesSource(client, settings.serpapi_api_key)]
+            sources.insert(0, GoogleImagesSource(client, settings.serpapi_api_key))
         discovery = ImageDiscoveryService(sources=sources)
         deduplicator = ImageDeduplicator(client=client)
         ai_provider = build_ai_provider(client)

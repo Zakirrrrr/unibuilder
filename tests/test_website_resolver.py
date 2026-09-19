@@ -45,6 +45,16 @@ def test_html_requires_full_name_academic_domain_and_teaching_signals():
     assert WebsiteUniversityResolver.identify(parser, "Example University", "https://directory.org/") is None
 
 
+def test_official_academic_title_can_verify_matching_acronym():
+    parser = IdentityPage()
+    parser.feed("<title>MIT - Massachusetts Institute of Technology</title>Admissions")
+    result = WebsiteUniversityResolver.identify(parser, "MIT", "https://www.mit.edu/")
+    assert result is not None
+    assert result.name == "Massachusetts Institute of Technology"
+    assert result.aliases == ["MIT"]
+    assert WebsiteUniversityResolver.identify(parser, "MIT", "https://www.other.edu/") is None
+
+
 @pytest.mark.anyio
 async def test_web_search_keeps_multiple_verified_candidates_ambiguous(monkeypatch):
     async def public(host):

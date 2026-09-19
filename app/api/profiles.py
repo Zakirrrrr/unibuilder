@@ -26,7 +26,9 @@ async def generate_profile(
     pipeline: ProfilePipelineService = Depends(get_profile_pipeline),
 ) -> UniversityProfile:
     try:
-        return await pipeline.generate(payload.query)
+        if payload.selected_university_id is None:
+            return await pipeline.generate(payload.query)
+        return await pipeline.generate(payload.query, selected_university_id=payload.selected_university_id)
     except ProfileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

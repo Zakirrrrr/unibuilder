@@ -41,6 +41,9 @@ address, exact title spelling, and an official source domain are NOT required.
 A missing or different street address is not evidence of irrelevance: campuses
 have many buildings. Accept plausibly related campus views as likely; do not
 reject them merely because precise location is unavailable.
+For city photos, check that the image depicts the university's stated city;
+do not claim that a city view is on campus. Sport and laboratory photos must
+belong to the university, not merely show a generic facility.
 Use confirmed when identifying visual evidence or source context strongly
 supports affiliation; likely when relevance is plausible but not fully
 proved; uncertain whenever reliable identification is not possible; and rejected
@@ -139,7 +142,7 @@ class GeminiService(ImageVerificationProvider):
             " Also mark is_interesting and give a short interest_reason for memorable, "
             "informative photos with identifiable subjects: public art, sculptures, "
             "historical details, exhibitions, traditions, unusual objects or campus wildlife. "
-            "Use category other for such relevant photos ONLY when none of the six main "
+            "Use category other for such relevant photos ONLY when none of the main "
             "categories fits. Do not force interesting images into the searched category. "
             "Keep genuine matches in their actual main category. Other is not a bucket "
             "for blurry, irrelevant or unverified images. Never invent interesting facts "

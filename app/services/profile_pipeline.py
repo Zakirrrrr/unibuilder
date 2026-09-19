@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from uuid import UUID
 
 from app.config import settings
 from app.models.image import ImageCandidate, VerificationStatus
@@ -83,11 +84,12 @@ class ProfilePipelineService:
         self._inflight: dict[str, asyncio.Task[UniversityProfile]] = {}
         self._cache_lock = asyncio.Lock()
 
-    async def generate(self, raw_query: str) -> UniversityProfile:
+    async def generate(self, raw_query: str, selected_university_id: UUID | None = None) -> UniversityProfile:
         query = normalize_query(raw_query)
-        key = comparison_key(query)
-        if not key:
+        normalized_key = comparison_key(query)
+        if not normalized_key:
             raise ProfileNotFoundError("University query is empty")
+        key = normalized_key + (f"|{selected_university_id}" if selected_university_id else "")
 
         async with self._cache_lock:
             cached = self._get_cached(key)
@@ -96,7 +98,7 @@ class ProfilePipelineService:
                 return cached.model_copy(deep=True)
             task = self._inflight.get(key)
             if task is None:
-                task = asyncio.create_task(self._generate_with_timeout(query))
+                task = asyncio.create_task(self._generate_with_timeout(query, selected_university_id))
                 self._inflight[key] = task
                 logger.info("profile generation started query=%s", query)
             else:
@@ -114,11 +116,11 @@ class ProfilePipelineService:
             self._store_cached(key, profile)
         return profile.model_copy(deep=True)
 
-    async def _generate_with_timeout(self, query: str) -> UniversityProfile:
+    async def _generate_with_timeout(self, query: str, selected_university_id: UUID | None = None) -> UniversityProfile:
         timeout = asyncio.timeout(self._timeout)
         try:
             async with timeout:
-                return await self._generate_uncached(query)
+                return await self._generate_uncached(query, selected_university_id)
         except TimeoutError as exc:
             if not timeout.expired():
                 raise
@@ -131,7 +133,7 @@ class ProfilePipelineService:
                 "Profile generation exceeded its time limit"
             ) from exc
 
-    async def _generate_uncached(self, query: str) -> UniversityProfile:
+    async def _generate_uncached(self, query: str, selected_university_id: UUID | None = None) -> UniversityProfile:
         started_at = time.monotonic()
         deadline = started_at + self._timeout
         # Resolution shares the overall deadline; no hidden seven-second cutoff.
@@ -142,8 +144,17 @@ class ProfilePipelineService:
         if resolution.status == ResolutionStatus.NOT_FOUND:
             raise ProfileNotFoundError("University was not found")
         if resolution.status == ResolutionStatus.AMBIGUOUS:
-            raise ProfileAmbiguousError(resolution.candidates)
-        university = resolution.university
+            if selected_university_id is None:
+                raise ProfileAmbiguousError(resolution.candidates)
+            university = next((item for item in resolution.candidates if item.id == selected_university_id), None)
+            if university is None:
+                raise ProfileNotFoundError("Selected university is no longer available")
+        else:
+            university = resolution.university
+            if selected_university_id is not None and (
+                university is None or university.id != selected_university_id
+            ):
+                raise ProfileNotFoundError("Selected university does not match the query")
         if university is None:  # Protected by the response model; keep boundary safe.
             raise ProfileNotFoundError("University resolution returned no entity")
 
@@ -260,6 +271,22 @@ class ProfilePipelineService:
                 f"Для {unavailable_count} изображений проверка недоступна: источник, AI или таймаут. Они сохранены отдельно как предварительные."
             )
 
+        category_labels = {
+            "campus": "кампуса", "library": "библиотек", "dormitory": "общежитий",
+            "classroom": "аудиторий", "student_life": "студенческой жизни",
+            "facilities": "инфраструктуры", "sport": "спортивных объектов",
+            "laboratory": "лабораторий", "city": "города",
+        }
+        shown = [(category, image) for category, group in categories.items() for image in group]
+        described = [category_labels[category.value] for category, group in categories.items()
+                     if group and category.value in category_labels]
+        summary_sources = list(dict.fromkeys(str(image.source_url) for _, image in shown))[:3]
+        campus_summary = (
+            "В найденных источниках представлены фотографии " + ", ".join(described)
+            + ". Для каждого изображения указан первоисточник и статус проверки."
+            if described else None
+        )
+
         profile = UniversityProfile(
             university=university,
             preliminary_images=preliminary_images,
@@ -271,6 +298,8 @@ class ProfilePipelineService:
                 rejected=rejected_count,
             ),
             warnings=warnings,
+            campus_summary=campus_summary,
+            summary_sources=summary_sources,
         )
         logger.info(
             "profile generation completed university=%s found=%d duplicates=%d "

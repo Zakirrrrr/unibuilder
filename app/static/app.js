@@ -1,212 +1,361 @@
-const form = document.querySelector("#profile-form");
-const queryInput = document.querySelector("#query");
-const submitButton = document.querySelector("#submit-button");
-const statusBox = document.querySelector("#status");
-const resultSection = document.querySelector("#result");
+const screens = Object.fromEntries(["search", "loading", "results"].map(name => [name, document.getElementById("screen-" + name)]));
+const names = {campus:"Кампус",dormitory:"Общежития",classroom:"Аудитории",library:"Библиотеки",student_life:"Студенческая жизнь",facilities:"Инфраструктура",sport:"Спорт",laboratory:"Лаборатории",city:"Город",other:"Другое"};
+const form = document.getElementById("searchForm");
+const input = document.getElementById("searchInput");
+const errorBox = document.getElementById("searchError");
+const candidatesBox = document.getElementById("resultsList");
+const circumference = 2 * Math.PI * 65;
+const loadingMessages = [
+  "🔎 Ищем университеты...",
+  "🌍 Изучаем кампусы по всему миру...",
+  "🏛️ Заглядываем в университеты...",
+  "📸 Собираем фотографии...",
+  "🖼️ Проверяем качество снимков...",
+  "🧹 Удаляем дубликаты...",
+  "🗂️ Делим на категории...",
+  "🧩 Сопоставляем фото и университеты...",
+  "🏠 Ищем фотографии общежитий...",
+  "📚 Подбираем фотографии библиотек...",
+  "🔬 Заглядываем в лаборатории...",
+  "🤔 Хм, кажется, нашли кое-что интересное...",
+  "🕵️ Ищем скрытые жемчужины...",
+  "☕ Наши алгоритмы уже выпили кофе...",
+  "✨ Наводим красоту...",
+];
+let aborter, ticker, messageTicker, requestNumber = 0, currentProfile, selectedCategory;
+const popupLayer = document.getElementById("loadingPopups");
+const popupItems = [];
+const popupGap = 18;
 
-const categoryLabels = {
-  campus: "Кампус",
-  library: "Библиотека",
-  dormitory: "Общежития",
-  classroom: "Аудитории",
-  student_life: "Студенческая жизнь",
-  facilities: "Инфраструктура",
-  other: "Другое",
-};
-
-const statisticLabels = {
-  found: "Найдено",
-  duplicates_removed: "Дубликатов удалено",
-  verified: "Проверено AI",
-  rejected: "Отклонено",
-};
-
-function element(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined && text !== null) node.textContent = text;
-  return node;
+function shuffledMessages() {
+  const messages = [...loadingMessages];
+  for (let i = messages.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [messages[i], messages[j]] = [messages[j], messages[i]];
+  }
+  return messages;
 }
-
-function setLoading(loading) {
-  submitButton.disabled = loading;
-  submitButton.classList.toggle("loading", loading);
-  queryInput.disabled = loading;
+function findPopupPosition(width, height, area, blocked, random = Math.random) {
+  const fits = (x, y) => x >= 16 && y >= 16 && x + width <= area.width - 16 &&
+    y + height <= area.height - 16 && blocked.every(rect =>
+      x + width + popupGap <= rect.x || x >= rect.x + rect.width + popupGap ||
+      y + height + popupGap <= rect.y || y >= rect.y + rect.height + popupGap);
+  const maxX = area.width - width - 16, maxY = area.height - height - 16;
+  if (maxX < 16 || maxY < 16) return null;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const x = 16 + random() * (maxX - 16), y = 16 + random() * (maxY - 16);
+    if (fits(x, y)) return {x, y};
+  }
+  const available = [];
+  for (let y = 16; y <= maxY; y += 12) {
+    for (let x = 16; x <= maxX; x += 12) {
+      if (fits(x, y)) available.push({x, y});
+    }
+  }
+  return available.length ? available[Math.floor(random() * available.length)] : null;
 }
-
-function showStatus(message, error = false) {
-  statusBox.textContent = message;
-  statusBox.classList.toggle("error", error);
-  statusBox.hidden = false;
+function placePopup(element, previous) {
+  const area = screens.loading.getBoundingClientRect();
+  const core = document.getElementById("loadingCore").getBoundingClientRect();
+  const blocked = [
+    {x:core.left-area.left,y:core.top-area.top,width:core.width,height:core.height},
+    ...previous.map(item => ({
+      x:parseFloat(item.style.left),y:parseFloat(item.style.top),
+      width:item.offsetWidth,height:item.offsetHeight
+    }))
+  ];
+  const width = element.offsetWidth, height = element.offsetHeight;
+  let position = findPopupPosition(width, height, area, blocked);
+  if (!position) {
+    // Small screens gain scrollable space instead of overlapping messages.
+    position = {
+      x:16 + Math.random() * Math.max(0, area.width-width-32),
+      y:Math.max(area.height, ...blocked.map(rect => rect.y+rect.height)) + popupGap
+    };
+    screens.loading.style.minHeight = (position.y + height + 16) + "px";
+  }
+  element.style.left = position.x + "px";
+  element.style.top = position.y + "px";
 }
+function addLoadingPopup(message) {
+  const element = document.createElement("p");
+  element.className = "loading-popup";
+  element.textContent = message;
+  popupLayer.append(element);
+  placePopup(element, popupItems);
+  popupItems.push(element);
+}
+function reflowLoadingPopups() {
+  if (!screens.loading.classList.contains("active")) return;
+  screens.loading.style.minHeight = "";
+  popupItems.forEach((element,index) => placePopup(element,popupItems.slice(0,index)));
+}
+window.addEventListener("resize", reflowLoadingPopups);
+document.fonts?.ready.then(reflowLoadingPopups);
 
-function renderStatistics(statistics) {
-  const container = document.querySelector("#statistics");
-  container.replaceChildren();
-  Object.entries(statisticLabels).forEach(([key, label]) => {
-    const card = element("div", "stat");
-    card.append(element("span", "stat-value", String(statistics[key] ?? 0)));
-    card.append(element("span", "stat-label", label));
-    container.append(card);
+function screen(name) {
+  Object.values(screens).forEach(element => element.classList.remove("active"));
+  screens[name].classList.add("active");
+  window.scrollTo(0, 0);
+}
+function errorText(value) { errorBox.textContent = value; errorBox.hidden = !value; }
+function safeUrl(value) {
+  try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) ? url.href : null; }
+  catch { return null; }
+}
+function stopLoadingTimers() {
+  if (ticker) clearInterval(ticker);
+  if (messageTicker) clearInterval(messageTicker);
+  ticker = undefined;
+  messageTicker = undefined;
+}
+function clearLoading() {
+  stopLoadingTimers();
+  popupLayer.replaceChildren();
+  popupItems.length = 0;
+  screens.loading.style.minHeight = "";
+  aborter = undefined;
+}
+function loading(name) {
+  document.getElementById("loadingUniName").textContent = name;
+  const status = document.getElementById("loadingStatus");
+  status.textContent = "";
+  screen("loading");
+  const messages = shuffledMessages();
+  let messageIndex = 0;
+  addLoadingPopup(messages[messageIndex]);
+  messageTicker = setInterval(() => {
+    messageIndex++;
+    addLoadingPopup(messages[messageIndex]);
+    if (messageIndex === messages.length - 1) {
+      clearInterval(messageTicker);
+      messageTicker = undefined;
+    }
+  }, 4000);
+  const ring = document.getElementById("ringFg");
+  const clock = document.getElementById("ringPct");
+  ring.style.strokeDasharray = String(circumference);
+  const start = performance.now();
+  const update = () => {
+    const elapsed = Math.min(performance.now() - start, 30000);
+    clock.textContent = Math.max(0, Math.ceil((30000 - elapsed) / 1000)) + " с";
+    ring.style.strokeDashoffset = String(circumference * elapsed / 30000);
+  };
+  update();
+  ticker = setInterval(update, 100);
+}
+function finishLoading(signal) {
+  stopLoadingTimers();
+  document.getElementById("loadingStatus").textContent = "⏳ Еще чуть-чуть...";
+  document.getElementById("ringPct").textContent = "✓";
+  document.getElementById("ringFg").style.strokeDashoffset = "0";
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(delay);
+      reject(new DOMException("Search cancelled", "AbortError"));
+    };
+    const delay = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, 1200);
+    signal.addEventListener("abort", onAbort, {once:true});
+    if (signal.aborted) onAbort();
   });
 }
-
-function renderWarnings(warnings = []) {
-  const container = document.querySelector("#warnings");
-  container.replaceChildren();
-  container.hidden = warnings.length === 0;
-  warnings.forEach((warning) => container.append(element("p", "", `⚠ ${warning}`)));
+function cancel() {
+  requestNumber++;
+  aborter?.abort();
+  clearLoading();
+  screen("search");
 }
-
-function renderImage(image) {
-  const card = element("article", "image-card");
-  const preview = element("img");
-  preview.src = image.image_url;
-  preview.alt = image.title || "Фотография университета";
-  preview.loading = "eager";
-  preview.referrerPolicy = "no-referrer";
-  preview.addEventListener("error", () => {
-    preview.replaceWith(element("p", "empty", "Источник не отдал превью. Откройте оригинальную страницу по ссылке ниже."));
-  }, { once: true });
-  card.append(preview);
-
-  const content = element("div", "image-content");
-  content.append(element("h4", "image-title", image.title || "Без названия"));
-  const badge = element("span", `badge ${image.verification_status}`,
-    image.confidence == null ? "Не проверено AI" : image.verification_status);
-  content.append(badge);
-  if (image.is_primary) content.append(element("span", "badge", "Лучший кадр · Gemini"));
-  if (typeof image.confidence === "number") {
-    content.append(element("span", "confidence", `${Math.round(image.confidence * 100)}%`));
-  }
-  if (image.verification_reason) content.append(element("p", "reason", image.verification_reason));
-  if (image.is_interesting && image.interest_reason) content.append(element("p", "reason", `Интересная деталь: ${image.interest_reason}`));
-  if (image.author) content.append(element("p", "reason", `Автор: ${image.author}`));
-  const source = element("a", "source", `Источник: ${image.source_name}`);
-  source.href = image.source_url;
-  source.target = "_blank";
-  source.rel = "noopener noreferrer";
-  content.append(source);
-  card.append(content);
-  return card;
+function explainFailure(reason) {
+  if (reason.name === "AbortError") return "Поиск не завершился за 30 секунд. Попробуйте ещё раз.";
+  if (reason.status === 404) return "Университет не найден. Уточните название.";
+  if (reason.status === 503) return "Источник данных временно недоступен. Попробуйте позже.";
+  if (reason.status === 504) return "Поиск занял слишком много времени. Попробуйте ещё раз.";
+  return "Не удалось создать профиль. Проверьте подключение и повторите поиск.";
 }
-
-function renderCategories(categories) {
-  const container = document.querySelector("#categories");
-  container.replaceChildren();
-  Object.entries(categoryLabels).forEach(([key, label]) => {
-    const images = categories[key] || [];
-    const section = element("section", "category");
-    const header = element("div", "category-header");
-    header.append(element("h3", "", label));
-    header.append(element("span", "category-count", `${images.length} фото`));
-    section.append(header);
-    if (images.length === 0) {
-      section.append(element("p", "empty", "В этой категории пока нет результатов"));
-    } else {
-      const grid = element("div", "image-grid");
-      images.forEach((image) => grid.append(renderImage(image)));
-      section.append(grid);
-    }
-    container.append(section);
+function showCandidates(candidates, query) {
+  candidatesBox.replaceChildren();
+  candidates.forEach(uni => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "result-row candidate-button";
+    const title = document.createElement("span");
+    title.className = "result-name";
+    title.textContent = uni.name;
+    const location = document.createElement("span");
+    location.className = "result-city";
+    location.textContent = [uni.city, uni.country].filter(Boolean).join(", ");
+    row.append(title, location);
+    row.addEventListener("click", () => generate(query, uni.id));
+    candidatesBox.append(row);
   });
+  candidatesBox.classList.add("open");
+  errorText("Найдено несколько университетов. Выберите нужный.");
+  screen("search");
 }
-
-function renderProfile(profile) {
-  document.querySelector("#university-name").textContent = profile.university.name;
-  const location = [profile.university.city, profile.university.country].filter(Boolean).join(", ");
-  document.querySelector("#university-location").textContent = location || "Местоположение не указано";
-
-  const domain = document.querySelector("#university-domain");
-  if (profile.university.official_domain) {
-    domain.textContent = profile.university.official_domain;
-    domain.href = `https://${profile.university.official_domain}`;
-    domain.hidden = false;
-  } else {
-    domain.hidden = true;
-  }
-
-  renderStatistics(profile.statistics);
-  document.querySelector("#resolution-evidence")?.remove();
-  if (profile.university.resolution_source) {
-    const evidence = element("p", "reason",
-      profile.university.resolution_source === "official_website"
-        ? "Университет определён по официальному сайту. " : "Университет определён по Wikidata. ");
-    evidence.id = "resolution-evidence";
-    const url = profile.university.evidence_urls?.[0];
-    if (url && /^https?:\/\//.test(url)) {
-      const link = element("a", "source", "Источник подтверждения");
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      evidence.append(link);
-    }
-    domain.parentElement.append(evidence);
-  }
-  renderWarnings(profile.warnings);
-  renderCategories(profile.categories);
-  const gallery = document.querySelector("#photo-gallery");
-  gallery.replaceChildren();
-  gallery.hidden = false;
-  const allImages = profile.preliminary_images || [];
-  const photos = [...new Map(allImages.filter(i => i.verification_status !== "rejected").map(i => [i.image_url, i])).values()];
-  if (photos.length) {
-    const details = element("details");
-    details.append(element("summary", "", `Не вошли в AI-подборку · ${photos.length}`));
-    details.append(element("p", "reason", "Предварительные или недостаточно уверенные результаты. Подборка Gemini — в категориях ниже."));
-    const grid = element("div", "image-grid");
-    photos.forEach(image => grid.append(renderImage(image)));
-    details.append(grid);
-    gallery.append(details);
-  } else {
-    gallery.hidden = true;
-  }
-  document.querySelector("#generated-at").textContent = `Сформировано: ${new Date(profile.generated_at).toLocaleString("ru-RU")}`;
-  resultSection.hidden = false;
-  resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function errorMessage(response, body) {
-  const status = body?.detail?.status;
-  if (response.status === 404 || status === "not_found") return "Университет не найден. Проверьте название и попробуйте снова.";
-  if (response.status === 409 || status === "ambiguous") return "Название неоднозначно. Уточните полное название университета или город.";
-  if (response.status === 504) return "Генерация заняла слишком много времени. Попробуйте ещё раз.";
-  if (response.status === 503) return "Источник сведений об университете временно недоступен. Попробуйте повторить запрос.";
-  return "Не удалось создать профиль. Проверьте backend и попробуйте снова.";
-}
-
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const query = queryInput.value.trim();
-  if (!query) return;
-
-  setLoading(true);
-  resultSection.hidden = true;
-  showStatus("Ищем университет и фотографии, затем проверяем их через Gemini…");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-
+async function generate(query, selectedId = null) {
+  if (aborter) aborter.abort();
+  clearLoading();
+  errorText("");
+  candidatesBox.classList.remove("open");
+  const number = ++requestNumber;
+  const activeController = new AbortController();
+  aborter = activeController;
+  const signal = activeController.signal;
+  const deadline = setTimeout(() => activeController.abort(), 30000);
+  loading(query);
   try {
     const response = await fetch("/api/profile/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-      signal: controller.signal,
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({query, selected_university_id:selectedId}), signal
     });
     const body = await response.json();
-    if (!response.ok) throw { response, body };
-    statusBox.hidden = true;
-    renderProfile(body);
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      showStatus("Превышено время ожидания. Backend мог продолжить обработку — повторите запрос, чтобы проверить cache.", true);
-    } else if (error?.response) {
-      showStatus(errorMessage(error.response, error.body), true);
-    } else {
-      showStatus("Нет соединения с backend. Убедитесь, что сервер запущен.", true);
+    if (number !== requestNumber) return;
+    if (!response.ok) {
+      const reason = new Error("HTTP " + response.status);
+      reason.status = response.status;
+      reason.detail = body.detail;
+      throw reason;
     }
+    render(body);
+    clearTimeout(deadline);
+    await finishLoading(signal);
+    if (number !== requestNumber) return;
+    screen("results");
+  } catch (reason) {
+    if (number !== requestNumber) return;
+    if (reason.status === 409 && Array.isArray(reason.detail?.candidates)) showCandidates(reason.detail.candidates, query);
+    else { errorText(explainFailure(reason)); screen("search"); }
   } finally {
-    clearTimeout(timeout);
-    setLoading(false);
+    clearTimeout(deadline);
+    if (number === requestNumber) clearLoading();
   }
+}
+form.addEventListener("submit", event => {
+  event.preventDefault();
+  const query = input.value.trim();
+  if (query) generate(query);
 });
+input.addEventListener("input", () => { errorText(""); candidatesBox.classList.remove("open"); });
+document.getElementById("cancelBtn").addEventListener("click", cancel);
+document.getElementById("backBtn").addEventListener("click", () => { cancel(); input.focus(); });
+
+function render(body) {
+  currentProfile = body;
+  const university = body.university || {};
+  document.getElementById("resultsUniName").textContent = university.name || "Университет";
+  const photos = Object.values(body.categories || {}).flat().concat(
+    (body.preliminary_images || []).filter(photo =>
+      photo.verification_status !== "rejected" &&
+      photo.is_real_photo !== false &&
+      photo.is_relevant !== false
+    )
+  );
+  const sources = new Set(photos.map(photo => safeUrl(photo.source_url)).filter(Boolean));
+  const place = [university.city, university.country].filter(Boolean).join(", ");
+  document.getElementById("resultsUniMeta").textContent = (place || "Местоположение не указано") + " · " + sources.size + " источников фотографий";
+  const categories = Object.keys(body.categories || {}).filter(key =>
+    body.categories[key].length + preliminaryFor(key).length > 0
+  );
+  selectedCategory = categories[0] || null;
+  renderTabs(categories);
+  renderGallery();
+  renderDetails(body);
+}
+function renderTabs(categories) {
+  const tabs = document.getElementById("tabs");
+  tabs.replaceChildren();
+  tabs.hidden = categories.length === 0;
+  categories.forEach(key => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "tab" + (key === selectedCategory ? " active" : "");
+    const count = currentProfile.categories[key].length + preliminaryFor(key).length;
+    tab.textContent = (names[key] || key) + " (" + count + ")";
+    tab.addEventListener("click", () => { selectedCategory = key; renderTabs(categories); renderGallery(); });
+    tabs.append(tab);
+  });
+}
+function preliminaryFor(category) {
+  return (currentProfile.preliminary_images || []).filter(photo =>
+    photo.verification_status !== "rejected" &&
+    photo.is_real_photo !== false &&
+    photo.is_relevant !== false &&
+    (names[photo.category] ? photo.category : "other") === category
+  );
+}
+function makePhoto(photo, category, preliminary = false) {
+  const card = document.createElement("article");
+  card.className = "photo-card";
+  const url = safeUrl(photo.image_url);
+  if (url) {
+    const image = document.createElement("img");
+    image.className = "photo-image";
+    image.src = url;
+    image.alt = photo.title || ((names[category] || category) + ": " + currentProfile.university.name);
+    image.loading = "lazy";
+    image.referrerPolicy = "no-referrer";
+    card.append(image);
+  }
+  const info = document.createElement("div");
+  info.className = "photo-info";
+  const badge = document.createElement("span");
+  badge.className = "photo-cat";
+  const status = photo.verification_status === "confirmed" ? "Подтверждено" : photo.verification_status === "likely" ? "Вероятно" : "Не подтверждено";
+  badge.textContent = (names[category] || category) + " · " + status;
+  if (preliminary && photo.verification_status === "uncertain") {
+    badge.title = "Категория определена предварительно по поисковому запросу";
+  }
+  info.append(badge);
+  const source = safeUrl(photo.source_url);
+  if (source) {
+    const link = document.createElement("a");
+    link.className = "photo-source";
+    link.href = source; link.target = "_blank"; link.rel = "noopener noreferrer";
+    link.textContent = photo.source_name || "Источник фотографии";
+    info.append(link);
+  }
+  if (photo.published_at || photo.retrieved_at) {
+    const date = document.createElement("span");
+    date.className = "photo-date";
+    date.textContent = photo.published_at ? "Опубликовано: " + photo.published_at : "Получено: " + photo.retrieved_at;
+    info.append(date);
+  }
+  card.append(info);
+  return card;
+}
+function renderGallery() {
+  const gallery = document.getElementById("gallery");
+  gallery.replaceChildren();
+  const verified = selectedCategory ? currentProfile.categories[selectedCategory] : [];
+  const preliminary = selectedCategory ? preliminaryFor(selectedCategory) : [];
+  if (!verified.length && !preliminary.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-hint";
+    empty.textContent = "Фотографии пока не найдены.";
+    gallery.append(empty);
+  } else {
+    verified.forEach(photo => gallery.append(makePhoto(photo, selectedCategory)));
+    preliminary.forEach(photo => gallery.append(makePhoto(photo, selectedCategory, true)));
+  }
+}
+function renderDetails(body) {
+  const details = document.getElementById("profileDetails");
+  details.replaceChildren();
+  if (body.campus_summary) {
+    const title = document.createElement("h3"); title.textContent = "О кампусе";
+    const text = document.createElement("p"); text.textContent = body.campus_summary;
+    details.append(title, text);
+    (body.summary_sources || []).forEach(raw => {
+      const url = safeUrl(raw);
+      if (!url) return;
+      const link = document.createElement("a");
+      link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
+      link.textContent = "Источник описания";
+      details.append(link);
+    });
+  }
+  details.hidden = !details.childNodes.length;
+}

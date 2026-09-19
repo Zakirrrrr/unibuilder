@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -13,6 +14,9 @@ PROFILE_CATEGORIES = (
     ImageCategory.CLASSROOM,
     ImageCategory.STUDENT_LIFE,
     ImageCategory.FACILITIES,
+    ImageCategory.SPORT,
+    ImageCategory.LABORATORY,
+    ImageCategory.CITY,
     ImageCategory.OTHER,
 )
 
@@ -29,6 +33,7 @@ class ProfileGenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=1, max_length=200)
+    selected_university_id: UUID | None = None
 
 
 class ProfileStatistics(BaseModel):
@@ -54,6 +59,8 @@ class UniversityProfile(BaseModel):
         )
     )
     warnings: list[str] = Field(default_factory=list)
+    campus_summary: str | None = None
+    summary_sources: list[str] = Field(default_factory=list)
     generated_at: datetime = Field(default_factory=utc_now)
 
     @field_validator("categories", mode="after")

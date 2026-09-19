@@ -1,4 +1,5 @@
 from enum import StrEnum
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, PrivateAttr
@@ -11,6 +12,9 @@ class ImageCategory(StrEnum):
     DORMITORY = "dormitory"
     STUDENT_LIFE = "student_life"
     FACILITIES = "facilities"
+    SPORT = "sport"
+    LABORATORY = "laboratory"
+    CITY = "city"
     OTHER = "other"
 
 
@@ -35,6 +39,8 @@ class ImageCandidate(BaseModel):
     description: str | None = None
     author: str | None = None
     license: str | None = None
+    published_at: str | None = None
+    retrieved_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).date().isoformat())
     category: ImageCategory = ImageCategory.OTHER
     is_real_photo: bool | None = None
     is_relevant: bool | None = None

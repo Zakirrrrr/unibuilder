@@ -16,7 +16,10 @@ def test_university_profile_defaults() -> None:
         ImageCategory.DORMITORY,
         ImageCategory.CLASSROOM,
         ImageCategory.STUDENT_LIFE,
-        ImageCategory.FACILITIES,
+            ImageCategory.FACILITIES,
+            ImageCategory.SPORT,
+            ImageCategory.LABORATORY,
+            ImageCategory.CITY,
         ImageCategory.OTHER,
     }
     assert all(images == [] for images in profile.categories.values())

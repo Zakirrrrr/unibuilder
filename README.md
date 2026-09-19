@@ -1,9 +1,8 @@
 # University Visual Profile API
 
-Backend foundation for building structured university visual profiles. This
-stage contains data contracts, a health endpoint, a university resolver backed
-by Wikidata, image discovery through Wikimedia Commons, deduplication, and
-multimodal verification through Gemini.
+Local website and API for structured university visual profiles. It combines
+university resolution, image discovery, duplicate removal, and multimodal
+verification through Gemini with the frontend supplied for LOCUSCASE1.
 
 ## Requirements
 
@@ -26,8 +25,16 @@ verification additionally requires `GEMINI_API_KEY`.
 uvicorn app.main:app --reload
 ```
 
-The test UI and API are available at `http://127.0.0.1:8000`. Open that address
-in a browser to generate a profile. Check the backend with:
+The integrated frontend and API are available at `http://127.0.0.1:8000`.
+Enter a university name and press **Найти**. The loading screen counts down from
+30 seconds while the real API request runs. Messages appear every four seconds
+in random order and random positions, remaining visible without repeating or
+overlapping each other or the timer. Small screens gain scrollable space when
+needed. Only after a successful response, it displays the final
+message for 1.2 seconds before opening the results. Errors and cancellation
+stop the animation immediately. Ambiguous names show a choice of universities. The gallery
+shows actual image URLs, source links, available dates, category filters, and
+unverified candidates separately. Check the backend with:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
@@ -93,12 +100,19 @@ Invoke-RestMethod `
 The resolver returns `resolved`, `ambiguous`, or `not_found`. Upstream timeout,
 network, rate-limit, and invalid-response failures are returned as HTTP 503.
 
-Image discovery runs six bounded queries (`campus`, `library`, `dormitory`,
-`students`, `classroom`, and `building`) with a maximum of five results per
-query. Results remain unverified: `is_real_photo` and `is_relevant` are `null`
+Image discovery runs bounded queries for campus, library, dormitory, students,
+classroom, building, sport, laboratory, and the university's city when known.
+Results remain unverified: `is_real_photo` and `is_relevant` are `null`
 until a later verification stage.
 
 ## Deduplication
+
+Wikimedia requests identify this application with `WIKIDATA_USER_AGENT` and a
+link to the project repository, following the
+[Wikimedia User-Agent policy](https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy).
+The old `local-development` contact placeholder caused HTTP 403 responses on
+this machine. Keep a real project/contact URL when changing this setting; the
+same header is used for Commons, Wikidata, and backend image downloads.
 
 `ImageDeduplicator` is a separate processing stage and downloads files only
 when `deduplicate(images)` is explicitly called. It computes SHA-256 over the
@@ -117,11 +131,10 @@ the key. Verification uses local rate limiting, timeouts, bounded retries, and
 validates provider output again with Pydantic. A malformed response marks only
 that image as `uncertain`, so the rest of the request can continue.
 
-Statuses are derived conservatively: `confirmed` additionally requires explicit
-university evidence in title/description or an official-domain source; visual
-similarity alone can produce at most `likely`. Low-confidence and conflicting
-results become `uncertain`, while clear non-photos or irrelevant images become
-`rejected`.
+Statuses are derived conservatively from visual and source context. Visual
+similarity alone is insufficient to establish affiliation. Low-confidence and
+conflicting results become `uncertain`, while clear non-photos or irrelevant
+images become `rejected`.
 
 The opt-in live test uses real Wikimedia Commons images and incurs API usage:
 
@@ -146,10 +159,13 @@ attributions are retained and displayed. Profiles containing Google photos
 are not cached. 2GIS public Places API does not expose photo downloads:
 https://docs.2gis.com/en/api/search/places/examples/filtering
 
-The UI also shows `preliminary_images`: candidates whose AI verification has
-not finished and checked images without a specific category. Missing AI results
-remain `uncertain` with null confidence and are labelled “Не проверено AI”.
-They do not count towards `statistics.verified`. Rejected images remain hidden.
+The UI places `preliminary_images` directly into the matching category gallery
+after curated photos. Each card shows its verification status. Categories for
+unverified candidates may come from the search topic rather than Gemini, and
+these candidates never count as confirmed. Candidates marked non-photos or
+irrelevant are hidden from the gallery. Rejected images remain hidden.
+Technical warnings and deduplication counts remain in the API response but
+are not shown in the consumer UI.
 Up to six AI checks now run concurrently, sharing a service-wide semaphore and
 the provider's rate limiter; the 29-second server deadline still applies.
 
@@ -159,9 +175,9 @@ Commons. Official images do not receive an invented licence or automatic
 confirmation: Gemini still evaluates the pixels and source context.
 
 Generation is capped at 29 seconds on the server (30 seconds in the UI).
-Resolution has a 7-second budget, discovery 5 seconds, deduplication 4 seconds;
-AI uses the remaining budget and completed decisions survive the deadline.
-Up to six candidates per search category are checked in six parallel batches. Unfinished checks are
+Resolution shares that budget, discovery has an eight-second deadline, and
+deduplication receives up to 3.5 seconds. AI uses the remaining budget.
+Up to six candidates per search category are checked in parallel batches. Unfinished checks are
 reported in warnings and never presented as confirmed. Partial profiles have
 a maximum 15-second cache lifetime so temporary failures can be retried soon.
 Successful profiles retain the normal configured TTL. Cache keys are exact
@@ -216,10 +232,10 @@ UI screenshot: `examples/ui-working.png`.
 Set `SERPAPI_API_KEY` in `.env` and restart the backend. This is a separate
 credential from `GEMINI_API_KEY`; do not commit either key. The integration uses
 [SerpAPI Google Images](https://serpapi.com/google-images-api), not Google Places.
-Provider quotas/pricing apply: six searches per uncached university profile.
+Provider quotas/pricing apply: up to nine image searches per uncached profile.
 
-With the search key configured, Google Images replaces the previous discovery
-sources: six parallel category queries, six candidates per query by default
+With the search key configured, Google Images joins the other discovery
+sources: category queries, six candidates per query by default
 (`PROFILE_LIMIT_PER_QUERY=5` for five), capped at six. Original image and
 publisher-page URLs are retained; unknown authors and licenses remain null.
 Search results are not proof of affiliation or permission to reuse an image.
@@ -231,14 +247,15 @@ affiliation, actual category and visual quality; no exact-address gate is used.
 Only real, relevant `likely`/`confirmed` images with quality >= 0.6 enter curated
 categories. Highest quality first, with `is_primary=true` on the best image;
 other qualifying images are included. `quality_score` is an AI assessment, not
-proof of provenance. Failed/unavailable checks remain preliminary in a separate
-collapsed UI section, never silently confirmed. A Gemini quota error cannot be
+proof of provenance. Failed/unavailable checks remain marked as unverified
+within their category, never silently confirmed. A Gemini quota error cannot be
 fixed by changing the prompt: restore quota to enable AI selection.
 
 ### Expanded selection and Other
 
-The profile now returns seven category keys including `other` (UI: «Другое»).
-The six searches yield up to 36 candidates, before URL/content deduplication.
+The profile now returns ten category keys including `other` (UI: «Другое»).
+Discovery searches eight university topics plus the city when known. The
+Google Images source can yield up to 54 candidates before URL/content deduplication.
 Gemini compares at most six images per call and marks `is_interesting` plus
 `interest_reason`. Relevant, clear photos with identifiable interesting subjects
 that do not fit the main categories may enter `other`; AI must explicitly flag

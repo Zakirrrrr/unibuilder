@@ -20,6 +20,8 @@ SEARCH_TOPICS = (
     SearchTopic("students"),
     SearchTopic("classroom"),
     SearchTopic("building"),
+    SearchTopic("sport"),
+    SearchTopic("laboratory"),
 )
 
 logger = logging.getLogger(__name__)
@@ -91,7 +93,7 @@ class ImageDiscoveryService:
     def build_queries(university: University) -> list[str]:
         name = normalize_query(university.name).replace('"', "")
         # Requiring city AND topic excludes many correctly identified campus files.
-        return [
+        queries = [
             " ".join(
                 part
                 for part in (f'"{name}"', topic.term)
@@ -99,3 +101,7 @@ class ImageDiscoveryService:
             )
             for topic in SEARCH_TOPICS
         ]
+        if university.city:
+            city = normalize_query(university.city).replace('"', "")
+            queries.append(f'"{city}" city')
+        return queries

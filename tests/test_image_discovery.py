@@ -37,9 +37,9 @@ async def test_discovery_builds_six_queries_with_city_and_deduplicates() -> None
 
     images = await service.search(university, limit_per_query=5)
 
-    assert len(source.queries) == 6
-    assert all('"Nazarbayev University"' in query for query, _ in source.queries)
-    assert all('"Astana"' not in query for query, _ in source.queries)
+    assert len(source.queries) == 9
+    assert all('"Nazarbayev University"' in query for query, _ in source.queries[:-1])
+    assert source.queries[-1][0] == '"Astana" city'
     assert all(limit == 5 for _, limit in source.queries)
     assert len(images) == 1
 

@@ -1,52 +1,79 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Генератор визуального профиля университета">
-  <title>University Visual Profile</title>
-  <link rel="stylesheet" href="/static/styles.css?v=photos-3">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Визуальный профиль университета</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="hero">
-      <p class="eyebrow">AI CAMPUS SCOUT</p>
-      <h1>Визуальный профиль<br><span>университета</span></h1>
-      <p class="lead">Введите название — сервис найдёт реальные фотографии, удалит дубликаты и проверит их через Gemini.</p>
 
-      <form id="profile-form" class="search-form">
-        <label for="query">Название университета</label>
-        <div class="search-row">
-          <input id="query" name="query" type="search" value="Nazarbayev University" maxlength="200" required autocomplete="organization" placeholder="Например, MIT">
-          <button id="submit-button" type="submit">
-            <span class="button-label">Создать профиль</span>
-            <span class="spinner" aria-hidden="true"></span>
-          </button>
+<div class="blob blob-a"></div>
+<div class="blob blob-b"></div>
+
+<!-- ===================== SCREEN 1: SEARCH ===================== -->
+<section id="screen-search" class="screen active">
+  <div class="kicker">LOCUSCASE1 · визуальный профиль</div>
+  <h1 class="hero">Найди <span class="accent">визуальный профиль</span><br>любого университета</h1>
+  <p class="sub">Введи название — мы найдём фото кампуса, общежитий и аудиторий, удалим повторы и покажем статус проверки. Поиск длится до 30 секунд.</p>
+
+  <form id="searchForm" class="search-wrap">
+    <div class="search-box">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="searchInput" type="text" maxlength="200" required placeholder="Например: КазНУ, MIT, Назарбаев..." autocomplete="off" aria-label="Название университета">
+      <button class="search-submit" type="submit">Найти</button>
+    </div>
+    <div id="resultsList" class="results-list"></div>
+    <p id="searchError" class="search-error" role="alert" hidden></p>
+  </form>
+
+  <div class="no-js-note">Введите полное название и нажмите «Найти». Результат зависит от доступности источников и AI.</div>
+</section>
+
+<!-- ===================== SCREEN 2: LOADING ===================== -->
+<section id="screen-loading" class="screen">
+  <div id="loadingPopups" class="loading-popups" aria-live="polite" aria-relevant="additions"></div>
+  <div id="loadingCore" class="loading-core">
+    <div class="loading-uni" id="loadingUniName">—</div>
+    <div class="ring-wrap">
+      <svg width="150" height="150" viewBox="0 0 150 150">
+        <circle class="ring-bg" cx="75" cy="75" r="65"/>
+        <circle class="ring-fg" id="ringFg" cx="75" cy="75" r="65"/>
+      </svg>
+      <div class="ring-pct" id="ringPct">30 с</div>
+    </div>
+    <div class="loading-status" id="loadingStatus" role="status" aria-live="polite"></div>
+
+    <p class="loading-explainer">Ищем источники, убираем повторы и проверяем фотографии. Таймер показывает оставшееся время, а не процент обработки.</p>
+    <button id="cancelBtn" class="back-btn loading-cancel" type="button">Отменить поиск</button>
+  </div>
+</section>
+
+<!-- ===================== SCREEN 3: RESULTS ===================== -->
+<section id="screen-results" class="screen">
+  <div class="results-shell">
+    <div class="results-top">
+      <div>
+        <button class="back-btn" id="backBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          Новый поиск
+        </button>
+        <div class="results-heading" style="margin-top:16px;">
+          <h2 id="resultsUniName">—</h2>
+          <p id="resultsUniMeta">—</p>
         </div>
-        <p class="hint">Результат за 30 секунд. Если часть источников недоступна, покажем готовые результаты.</p>
-      </form>
-    </header>
-
-    <section id="status" class="status" aria-live="polite" hidden></section>
-
-    <section id="result" class="result" hidden>
-      <div class="university-heading">
-        <div>
-          <p class="eyebrow">PROFILE READY</p>
-          <h2 id="university-name"></h2>
-          <p id="university-location" class="location"></p>
-        </div>
-        <a id="university-domain" class="domain" target="_blank" rel="noopener noreferrer"></a>
       </div>
+    </div>
 
-      <div id="photo-gallery" class="category"></div>
-      <div id="statistics" class="statistics"></div>
-      <div id="warnings" class="warnings" hidden></div>
-      <div id="categories" class="categories"></div>
-      <p id="generated-at" class="generated-at"></p>
-    </section>
-  </main>
+    <div class="tabs" id="tabs"></div>
+    <div class="gallery" id="gallery"></div>
+    <section id="profileDetails" class="profile-details" hidden></section>
+  </div>
+</section>
 
-  <script src="/static/app.js?v=photos-3" defer></script>
+<script src="/static/app.js" defer></script>
 </body>
 </html>
